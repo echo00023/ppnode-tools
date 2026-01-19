@@ -56,32 +56,29 @@ cmd_add() {
     echo
     echo -e "${BOLD}Adding instance:${RESET} $INSTANCE"
 
-    # 1. copy config directory
     cp -a "$BASE_ETC" "$NEW_ETC"
 
     CONFIG_FILE="${NEW_ETC}/config.yml"
-    [ -f "$CONFIG_FILE" ] || err "config.yml not found in $NEW_ETC"
+    [ -f "$CONFIG_FILE" ] || err "config.yml not found"
 
-    # 2. interactive input (NO auto read, NO grep)
     echo
     read -p "API Host: " API_HOST
     read -p "Server ID: " SERVER_ID
     read -p "Secret Key: " SECRET_KEY
 
-    [ -n "$API_HOST" ]   || err "api-host cannot be empty"
-    [ -n "$SERVER_ID" ]  || err "server-id cannot be empty"
-    [ -n "$SECRET_KEY" ] || err "secret-key cannot be empty"
+    [ -n "$API_HOST" ]   || err "ApiHost cannot be empty"
+    [ -n "$SERVER_ID" ]  || err "ServerID cannot be empty"
+    [ -n "$SECRET_KEY" ] || err "SecretKey cannot be empty"
 
-    # 3. update YAML safely
-    sed -i \
-        -e "s#^api-host:.*#api-host: ${API_HOST}#" \
-        -e "s#^server-id:.*#server-id: ${SERVER_ID}#" \
-        -e "s#^secret-key:.*#secret-key: ${SECRET_KEY}#" \
-        "$CONFIG_FILE"
+    # 🔴 核心修复点：字段名 + 缩进全部正确
+    sed -i -E \
+      -e "s/^([[:space:]]*ApiHost:).*/\1 ${API_HOST}/" \
+      -e "s/^([[:space:]]*ServerID:).*/\1 ${SERVER_ID}/" \
+      -e "s/^([[:space:]]*SecretKey:).*/\1 ${SECRET_KEY}/" \
+      "$CONFIG_FILE"
 
-    ok "config.yml updated"
+    ok "config.yml updated (ApiHost / ServerID / SecretKey)"
 
-    # 4. create systemd service
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=PPanel-node ${INSTANCE}
@@ -103,6 +100,7 @@ EOF
     systemctl daemon-reload
     ok "instance '${INSTANCE}' created"
 }
+
 
 # ==================================================
 # list instances (ONLY ours)
