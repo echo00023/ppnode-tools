@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==================================================
-# ppnode v1.1 - PPanel-node multi-instance manager
+# ppnode v1.2 - PPanel-node multi-instance manager
 # ==================================================
 
 set -e
@@ -39,13 +39,13 @@ config_dir() {
     echo "/etc/PPanel-node-$1"
 }
 
+escape_sed() {
+    printf '%s' "$1" | sed 's/[\/&]/\\&/g'
+}
+
 # ==================================================
 # add instance
 # ==================================================
-escape_sed() {
-    printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
-}
-
 cmd_add() {
     require_root
     INSTANCE="$1"
@@ -53,23 +53,22 @@ cmd_add() {
 
     NEW_ETC="$(config_dir "$INSTANCE")"
     SERVICE_FILE="${SYSTEMD_DIR}/$(service_name "$INSTANCE")"
+    BASE_CONFIG="${BASE_ETC}/config.yml"
 
     [ -d "$BASE_ETC" ] || err "base config dir not found: $BASE_ETC"
-    [ ! -d "$NEW_ETC" ] || err "instance already exists"
-
-    BASE_CONFIG="${BASE_ETC}/config.yml"
     [ -f "$BASE_CONFIG" ] || err "base config.yml not found"
+    [ ! -d "$NEW_ETC" ] || err "instance already exists"
 
     echo
     echo -e "${BOLD}Adding instance:${RESET} $INSTANCE"
 
-    # 1. copy base config
+    # copy base config
     cp -a "$BASE_ETC" "$NEW_ETC"
 
     CONFIG_FILE="${NEW_ETC}/config.yml"
     [ -f "$CONFIG_FILE" ] || err "config.yml not found in new instance"
 
-    # 2. read base ApiHost / SecretKey (SAFE read)
+    # read base ApiHost / SecretKey
     BASE_API_HOST=$(grep -E "^[[:space:]]*ApiHost:" "$BASE_CONFIG" | sed 's/.*ApiHost:[[:space:]]*//')
     BASE_SECRET_KEY=$(grep -E "^[[:space:]]*SecretKey:" "$BASE_CONFIG" | sed 's/.*SecretKey:[[:space:]]*//')
 
@@ -77,7 +76,7 @@ cmd_add() {
     [ -n "$BASE_SECRET_KEY" ] || err "failed to read SecretKey from base config"
 
     echo
-    echo "Base panel configuration detected:"
+    echo "Base panel detected:"
     echo "  ApiHost    : $BASE_API_HOST"
     echo "  SecretKey : ********"
     echo
@@ -99,21 +98,18 @@ cmd_add() {
     [ -n "$SERVER_ID" ]  || err "ServerID cannot be empty"
     [ -n "$SECRET_KEY" ] || err "SecretKey cannot be empty"
 
-    # 3. escape values for sed
     API_HOST_ESC=$(escape_sed "$API_HOST")
     SERVER_ID_ESC=$(escape_sed "$SERVER_ID")
     SECRET_KEY_ESC=$(escape_sed "$SECRET_KEY")
 
-    # 4. update YAML (safe for indentation & special chars)
     sed -i -E \
       -e "s|^([[:space:]]*ApiHost:).*|\1 ${API_HOST_ESC}|" \
       -e "s|^([[:space:]]*ServerID:).*|\1 ${SERVER_ID_ESC}|" \
       -e "s|^([[:space:]]*SecretKey:).*|\1 ${SECRET_KEY_ESC}|" \
       "$CONFIG_FILE"
 
-    ok "config.yml updated (ApiHost / ServerID / SecretKey)"
+    ok "config.yml updated"
 
-    # 5. create systemd service
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=PPanel-node ${INSTANCE}
@@ -133,12 +129,11 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    ok "instance '${INSTANCE}' created"
+    ok "instance '$INSTANCE' created"
 }
 
-
 # ==================================================
-# list instances (ONLY ours)
+# list instances
 # ==================================================
 cmd_list() {
     printf "${BOLD}%-20s %-10s${RESET}\n" "INSTANCE" "STATUS"
@@ -152,6 +147,39 @@ cmd_list() {
         state=$(systemctl is-active "$name" 2>/dev/null || echo unknown)
         printf "%-20s %-10s\n" "$inst" "$state"
     done
+}
+
+# ==================================================
+# remove instance
+# ==================================================
+cmd_remove() {
+    require_root
+    INSTANCE="$1"
+    validate_name "$INSTANCE"
+
+    CONF_DIR="$(config_dir "$INSTANCE")"
+    SERVICE_NAME="$(service_name "$INSTANCE")"
+    SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}"
+
+    echo
+    echo -e "${YELLOW}About to REMOVE instance:${RESET} $INSTANCE"
+    echo "  Config dir : $CONF_DIR"
+    echo "  Service    : $SERVICE_NAME"
+    echo
+
+    [ -d "$CONF_DIR" ] || err "instance config not found"
+
+    read -p "Type YES to confirm deletion: " CONFIRM
+    [ "$CONFIRM" = "YES" ] || { warn "aborted"; return; }
+
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+
+    rm -f "$SERVICE_FILE"
+    rm -rf "$CONF_DIR"
+
+    systemctl daemon-reload
+    ok "instance '$INSTANCE' removed"
 }
 
 # ==================================================
@@ -183,10 +211,11 @@ cmd_manage() {
         echo "----------------------------------"
         echo "1) List instances"
         echo "2) Add instance"
-        echo "3) Start instance"
-        echo "4) Stop instance"
-        echo "5) Restart instance"
-        echo "6) Status instance"
+        echo "3) Remove instance"
+        echo "4) Start instance"
+        echo "5) Stop instance"
+        echo "6) Restart instance"
+        echo "7) Status instance"
         echo "0) Exit"
         echo
         read -p "Select: " C
@@ -194,10 +223,11 @@ cmd_manage() {
         case "$C" in
             1) cmd_list ;;
             2) read -p "Name: " N; cmd_add "$N" ;;
-            3) read -p "Name: " N; cmd_ctl start "$N" ;;
-            4) read -p "Name: " N; cmd_ctl stop "$N" ;;
-            5) read -p "Name: " N; cmd_ctl restart "$N" ;;
-            6) read -p "Name: " N; cmd_status "$N" ;;
+            3) read -p "Name: " N; cmd_remove "$N" ;;
+            4) read -p "Name: " N; cmd_ctl start "$N" ;;
+            5) read -p "Name: " N; cmd_ctl stop "$N" ;;
+            6) read -p "Name: " N; cmd_ctl restart "$N" ;;
+            7) read -p "Name: " N; cmd_status "$N" ;;
             0) exit 0 ;;
             *) warn "invalid choice" ;;
         esac
@@ -212,6 +242,7 @@ cmd_manage() {
 # ==================================================
 case "$1" in
     add)     cmd_add "$2" ;;
+    remove)  cmd_remove "$2" ;;
     list)    cmd_list ;;
     start|stop|restart) cmd_ctl "$1" "$2" ;;
     status)  cmd_status "$2" ;;
@@ -219,6 +250,7 @@ case "$1" in
     *)
         echo "Usage:"
         echo "  ppnode add panelX"
+        echo "  ppnode remove panelX"
         echo "  ppnode list"
         echo "  ppnode start|stop|restart panelX"
         echo "  ppnode status panelX"
