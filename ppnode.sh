@@ -42,6 +42,10 @@ config_dir() {
 # ==================================================
 # add instance
 # ==================================================
+escape_sed() {
+    printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
+}
+
 cmd_add() {
     require_root
     INSTANCE="$1"
@@ -70,11 +74,14 @@ cmd_add() {
     [ -n "$SERVER_ID" ]  || err "ServerID cannot be empty"
     [ -n "$SECRET_KEY" ] || err "SecretKey cannot be empty"
 
-    # 🔴 核心修复点：字段名 + 缩进全部正确
+    API_HOST_ESC=$(escape_sed "$API_HOST")
+    SERVER_ID_ESC=$(escape_sed "$SERVER_ID")
+    SECRET_KEY_ESC=$(escape_sed "$SECRET_KEY")
+
     sed -i -E \
-      -e "s/^([[:space:]]*ApiHost:).*/\1 ${API_HOST}/" \
-      -e "s/^([[:space:]]*ServerID:).*/\1 ${SERVER_ID}/" \
-      -e "s/^([[:space:]]*SecretKey:).*/\1 ${SECRET_KEY}/" \
+      -e "s|^([[:space:]]*ApiHost:).*|\1 ${API_HOST_ESC}|" \
+      -e "s|^([[:space:]]*ServerID:).*|\1 ${SERVER_ID_ESC}|" \
+      -e "s|^([[:space:]]*SecretKey:).*|\1 ${SECRET_KEY_ESC}|" \
       "$CONFIG_FILE"
 
     ok "config.yml updated (ApiHost / ServerID / SecretKey)"
@@ -100,7 +107,6 @@ EOF
     systemctl daemon-reload
     ok "instance '${INSTANCE}' created"
 }
-
 
 # ==================================================
 # list instances (ONLY ours)
