@@ -1,17 +1,42 @@
 # ppnode-tools
-PPnode多开脚本
 
-## Install ppnode (optional)
+A safe and predictable lifecycle manager for **PPanel-node (ppnode)**.
 
-This tool can run the official ppnode installer for you:
+This tool is designed to manage **multiple ppnode instances** on a single server
+using **systemd**, based on an existing or officially installed ppnode setup.
+
+---
+
+## ✨ Features
+
+- Official ppnode installer wrapper (optional)
+- systemd-based multi-instance management
+- Fully isolated config directories per instance
+- Interactive TUI manager
+- No magic, no background behavior
+- Designed for production use
+
+---
+
+## ❗ Design Philosophy
+
+This project **does NOT** use `curl | bash`.
+
+Why?
+
+Because:
+- ppnode management logic is non-trivial
+- partial execution can corrupt installations
+- predictable behavior is more important than one-liners
+
+You always install the tool **explicitly**.
+
+---
+
+## 📦 Installation
 
 ```bash
-ppnode install \
-  --api-host https://panel.example.com \
-  --server-id 1 \
-  --secret-key YOUR_SECRET
+curl -fsSL https://raw.githubusercontent.com/echo00023/ppnode-tools/main/ppnode.sh \
+  -o /usr/local/bin/ppnode
 
-
-一键命令
-
-curl -fsSL https://raw.githubusercontent.com/echo00023/ppnode-tools/main/ppnode.sh | bash
+chmod +x /usr/local/bin/ppnode
