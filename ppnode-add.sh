@@ -1,84 +1,147 @@
 #!/bin/bash
 # ==================================================
-# ppnode-add : add a new ppnode instance safely
+# ppnode : all-in-one ppnode lifecycle manager
 # ==================================================
 
 set -e
 
-# ---------- must run as root ----------
-if [ "$(id -u)" -ne 0 ]; then
-    echo "ERROR: please run this script as root"
-    exit 1
-fi
+# ---------- colors ----------
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+GRAY="\033[90m"
+BOLD="\033[1m"
+RESET="\033[0m"
 
+# ---------- constants ----------
 BASE_NAME="PPanel-node"
 BASE_ETC="/etc/PPanel-node"
 BASE_BIN="/usr/local/PPanel-node/ppnode"
 SYSTEMD_DIR="/etc/systemd/system"
+OFFICIAL_INSTALL_URL="https://raw.githubusercontent.com/perfect-panel/ppanel-node/master/scripts/install.sh"
 
-INSTANCE="$1"
-
-if [ -z "$INSTANCE" ]; then
-    echo "Usage: ppnode-add <instance_name>"
-    echo "Example: ppnode-add panel2"
+# ---------- root check ----------
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}ERROR:${RESET} please run as root"
     exit 1
 fi
 
-# basic name validation
-if ! [[ "$INSTANCE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    echo "ERROR: instance name contains invalid characters"
-    exit 1
-fi
+# ---------- helpers ----------
+ok()    { echo -e "${GREEN}✔${RESET} $1"; }
+warn()  { echo -e "${YELLOW}!${RESET} $1"; }
+err()   { echo -e "${RED}✘${RESET} $1"; exit 1; }
 
-NEW_ETC="/etc/PPanel-node-${INSTANCE}"
-SERVICE_NAME="${BASE_NAME}-${INSTANCE}.service"
-SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE_NAME}"
+validate_name() {
+    [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || err "invalid instance name"
+}
 
-# ---------- sanity checks ----------
+service_name() {
+    echo "${BASE_NAME}-$1.service"
+}
 
-if [ ! -d "$BASE_ETC" ]; then
-    echo "ERROR: base config directory not found: $BASE_ETC"
-    exit 1
-fi
+config_dir() {
+    echo "/etc/PPanel-node-$1"
+}
 
-if [ ! -x "$BASE_BIN" ]; then
-    echo "ERROR: ppnode binary not found: $BASE_BIN"
-    exit 1
-fi
+status_color() {
+    case "$1" in
+        active)   echo -e "${GREEN}active${RESET}" ;;
+        inactive) echo -e "${GRAY}inactive${RESET}" ;;
+        failed)   echo -e "${RED}failed${RESET}" ;;
+        *)        echo "$1" ;;
+    esac
+}
 
-if [ -d "$NEW_ETC" ]; then
-    echo "ERROR: instance config already exists: $NEW_ETC"
-    exit 1
-fi
+# ==================================================
+# install (official)
+# ==================================================
+cmd_install() {
+    echo -e "${BOLD}${BLUE}Installing ppnode (official installer)${RESET}\n"
 
-if [ -f "$SERVICE_FILE" ]; then
-    echo "ERROR: systemd service already exists: $SERVICE_FILE"
-    exit 1
-fi
+    if [ -x "$BASE_BIN" ]; then
+        warn "ppnode already installed, skip"
+        return
+    fi
 
-# ---------- create instance config ----------
+    API_HOST=""
+    SERVER_ID=""
+    SECRET_KEY=""
 
-echo "[*] Creating config directory: $NEW_ETC"
-cp -a "$BASE_ETC" "$NEW_ETC"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --api-host)   API_HOST="$2"; shift 2 ;;
+            --server-id)  SERVER_ID="$2"; shift 2 ;;
+            --secret-key) SECRET_KEY="$2"; shift 2 ;;
+            *) err "unknown option: $1" ;;
+        esac
+    done
 
-# ---------- create systemd service ----------
+    [ -n "$API_HOST" ]   || err "--api-host is required"
+    [ -n "$SERVER_ID" ]  || err "--server-id is required"
+    [ -n "$SECRET_KEY" ] || err "--secret-key is required"
 
-echo "[*] Creating systemd service: $SERVICE_NAME"
+    TMP=$(mktemp)
+    ok "downloading official install script"
+    wget -qO "$TMP" "$OFFICIAL_INSTALL_URL"
 
-cat > "$SERVICE_FILE" <<EOF
+    ok "running official installer"
+    bash "$TMP" \
+        --api-host "$API_HOST" \
+        --server-id "$SERVER_ID" \
+        --secret-key "$SECRET_KEY"
+
+    rm -f "$TMP"
+
+    ok "ppnode installed successfully"
+}
+
+# ==================================================
+# init (environment check)
+# ==================================================
+cmd_init() {
+    echo -e "${BOLD}${BLUE}Checking ppnode environment${RESET}\n"
+
+    [ -x "$BASE_BIN" ] && ok "ppnode binary found" || err "ppnode binary NOT found"
+    [ -d "$BASE_ETC" ] && ok "base config found: $BASE_ETC" || err "base config NOT found"
+
+    systemctl --version >/dev/null 2>&1 \
+        && ok "systemd detected" \
+        || err "systemd not found"
+
+    echo
+    ok "Environment ready"
+}
+
+# ==================================================
+# add instance
+# ==================================================
+cmd_add() {
+    INSTANCE="$1"
+    validate_name "$INSTANCE"
+
+    NEW_ETC="$(config_dir "$INSTANCE")"
+    SERVICE="$(service_name "$INSTANCE")"
+    SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE}"
+
+    [ -d "$BASE_ETC" ] || err "base config not found: $BASE_ETC"
+    [ -x "$BASE_BIN" ] || err "ppnode binary not found"
+    [ ! -d "$NEW_ETC" ] || err "instance already exists"
+    [ ! -f "$SERVICE_FILE" ] || err "service already exists"
+
+    cp -a "$BASE_ETC" "$NEW_ETC"
+
+    cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=PPanel-node ${INSTANCE}
 After=network.target
-Wants=network.target
 
 [Service]
 Type=simple
 User=root
 Group=root
-
 WorkingDirectory=/usr/local/PPanel-node
 ExecStart=/usr/local/PPanel-node/ppnode server -c ${NEW_ETC}/config.json
-
 Restart=always
 RestartSec=10
 
@@ -86,34 +149,130 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-# ---------- reload systemd ----------
+    systemctl daemon-reload
+    ok "instance '${INSTANCE}' created"
+    warn "edit config: ${NEW_ETC}/config.json"
+}
 
-echo "[*] Reloading systemd"
-systemctl daemon-reload
+# ==================================================
+# remove instance
+# ==================================================
+cmd_remove() {
+    INSTANCE="$1"
+    validate_name "$INSTANCE"
 
-# ---------- self install (one-line install support) ----------
+    SERVICE="$(service_name "$INSTANCE")"
+    CONF="$(config_dir "$INSTANCE")"
 
-if [ ! -f /usr/local/bin/ppnode-add ]; then
-    echo "[*] Installing ppnode-add to /usr/local/bin"
-    install -m 755 "$0" /usr/local/bin/ppnode-add
+    echo -e "${YELLOW}About to remove instance:${RESET} ${INSTANCE}"
+    read -p "Type YES to continue: " C
+    [ "$C" = "YES" ] || { warn "aborted"; return; }
+
+    systemctl stop "$SERVICE" 2>/dev/null || true
+    systemctl disable "$SERVICE" 2>/dev/null || true
+    rm -f "${SYSTEMD_DIR}/${SERVICE}"
+    rm -rf "$CONF"
+    systemctl daemon-reload
+
+    ok "instance '${INSTANCE}' removed"
+}
+
+# ==================================================
+# list instances
+# ==================================================
+cmd_list() {
+    printf "${BOLD}%-20s %-10s${RESET}\n" "INSTANCE" "STATUS"
+    printf "%-20s %-10s\n" "--------" "------"
+
+    systemctl list-units --type=service --all | \
+    grep "${BASE_NAME}-" | awk '{print $1}' | while read -r svc; do
+        NAME="${svc#${BASE_NAME}-}"
+        NAME="${NAME%.service}"
+        STATE=$(systemctl is-active "$svc")
+        printf "%-20s %-10b\n" "$NAME" "$(status_color "$STATE")"
+    done
+}
+
+# ==================================================
+# control instance
+# ==================================================
+cmd_ctl() {
+    ACTION="$1"
+    INSTANCE="$2"
+    validate_name "$INSTANCE"
+    systemctl "$ACTION" "$(service_name "$INSTANCE")"
+}
+
+cmd_status() {
+    INSTANCE="$1"
+    validate_name "$INSTANCE"
+    systemctl status "$(service_name "$INSTANCE")"
+}
+
+# ==================================================
+# manage UI
+# ==================================================
+cmd_manage() {
+    while true; do
+        clear
+        echo -e "${BOLD}${BLUE}PPanel-node Manager${RESET}"
+        echo "----------------------------------"
+        echo "1) List instances"
+        echo "2) Add instance"
+        echo "3) Remove instance"
+        echo "4) Start instance"
+        echo "5) Stop instance"
+        echo "6) Restart instance"
+        echo "7) Status instance"
+        echo "0) Exit"
+        echo
+        read -p "Select: " C
+
+        case "$C" in
+            1) cmd_list ;;
+            2) read -p "Name: " N; cmd_add "$N" ;;
+            3) read -p "Name: " N; cmd_remove "$N" ;;
+            4) read -p "Name: " N; cmd_ctl start "$N" ;;
+            5) read -p "Name: " N; cmd_ctl stop "$N" ;;
+            6) read -p "Name: " N; cmd_ctl restart "$N" ;;
+            7) read -p "Name: " N; cmd_status "$N" ;;
+            0) exit 0 ;;
+            *) warn "invalid choice" ;;
+        esac
+        echo
+        read -p "Press Enter to continue..."
+    done
+}
+
+# ==================================================
+# self install
+# ==================================================
+if [ "$0" != "/usr/local/bin/ppnode" ]; then
+    install -m 755 "$0" /usr/local/bin/ppnode
+    ok "installed to /usr/local/bin/ppnode"
 fi
 
-# ---------- done ----------
-
-echo
-echo "✔ ppnode instance '${INSTANCE}' created successfully"
-echo
-echo "Next steps:"
-echo "  1. Edit config (IMPORTANT):"
-echo "     vim ${NEW_ETC}/config.json"
-echo
-echo "     - change panel address"
-echo "     - change node ID"
-echo "     - change listen ports"
-echo
-echo "  2. Start service:"
-echo "     systemctl enable ${SERVICE_NAME} --now"
-echo
-echo "  3. Check status:"
-echo "     systemctl status ${SERVICE_NAME}"
-echo
+# ==================================================
+# main
+# ==================================================
+case "$1" in
+    install) shift; cmd_install "$@" ;;
+    init)    cmd_init ;;
+    add)     cmd_add "$2" ;;
+    remove)  cmd_remove "$2" ;;
+    list)    cmd_list ;;
+    start|stop|restart) cmd_ctl "$1" "$2" ;;
+    status)  cmd_status "$2" ;;
+    manage|"") cmd_manage ;;
+    *)
+        echo "Usage:"
+        echo "  ppnode install --api-host URL --server-id ID --secret-key KEY"
+        echo "  ppnode init"
+        echo "  ppnode add panelX"
+        echo "  ppnode remove panelX"
+        echo "  ppnode list"
+        echo "  ppnode start|stop|restart panelX"
+        echo "  ppnode status panelX"
+        echo "  ppnode manage"
+        ;;
+esac
