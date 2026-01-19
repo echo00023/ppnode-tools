@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==================================================
-# ppnode : all-in-one ppnode lifecycle manager
+# ppnode v1.0 - PPanel-node lifecycle manager
 # ==================================================
 
 set -e
@@ -21,16 +21,14 @@ BASE_BIN="/usr/local/PPanel-node/ppnode"
 SYSTEMD_DIR="/etc/systemd/system"
 OFFICIAL_INSTALL_URL="https://raw.githubusercontent.com/perfect-panel/ppanel-node/master/scripts/install.sh"
 
-# ---------- root check ----------
-if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${RED}ERROR:${RESET} please run as root"
-    exit 1
-fi
-
 # ---------- helpers ----------
-ok()    { echo -e "${GREEN}✔${RESET} $1"; }
-warn()  { echo -e "${YELLOW}!${RESET} $1"; }
-err()   { echo -e "${RED}✘${RESET} $1"; exit 1; }
+ok()   { echo -e "${GREEN}✔${RESET} $1"; }
+warn() { echo -e "${YELLOW}!${RESET} $1"; }
+err()  { echo -e "${RED}✘${RESET} $1"; exit 1; }
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || err "please run as root"
+}
 
 validate_name() {
     [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || err "invalid instance name"
@@ -49,32 +47,15 @@ status_color() {
         active)   echo -e "${GREEN}active${RESET}" ;;
         inactive) echo -e "${GRAY}inactive${RESET}" ;;
         failed)   echo -e "${RED}failed${RESET}" ;;
-        *)        echo "$1" ;;
+        *)        echo -e "${YELLOW}$1${RESET}" ;;
     esac
 }
-# ==================================================
-# self install (ABSOLUTELY curl | bash SAFE)
-# ==================================================
-SELF_BIN="/usr/local/bin/ppnode"
-
-if [ ! -x "$SELF_BIN" ]; then
-    echo "[*] Installing ppnode to $SELF_BIN"
-    mkdir -p /usr/local/bin
-
-    # stdin -> file (curl | bash safe)
-    cat > "$SELF_BIN"
-
-    chmod +x "$SELF_BIN"
-    echo "[OK] ppnode installed"
-    echo "You can now run: ppnode"
-    exit 0
-fi
 
 # ==================================================
-# install (official)
+# install (official installer wrapper)
 # ==================================================
 cmd_install() {
-    echo -e "${BOLD}${BLUE}Installing ppnode (official installer)${RESET}\n"
+    require_root
 
     if [ -x "$BASE_BIN" ]; then
         warn "ppnode already installed, skip"
@@ -112,41 +93,39 @@ cmd_install() {
         --secret-key "$SECRET_KEY"
 
     rm -rf "$TMP_DIR"
-
     ok "ppnode installed successfully"
 }
-
 
 # ==================================================
 # init (environment check)
 # ==================================================
 cmd_init() {
-    echo -e "${BOLD}${BLUE}Checking ppnode environment${RESET}\n"
+    require_root
 
-    [ -x "$BASE_BIN" ] && ok "ppnode binary found" || err "ppnode binary NOT found"
-    [ -d "$BASE_ETC" ] && ok "base config found: $BASE_ETC" || err "base config NOT found"
+    echo -e "${BOLD}${BLUE}Checking environment${RESET}\n"
+
+    [ -x "$BASE_BIN" ] && ok "ppnode binary found" || err "ppnode binary not found"
+    [ -d "$BASE_ETC" ] && ok "base config found: $BASE_ETC" || err "base config not found"
 
     systemctl --version >/dev/null 2>&1 \
         && ok "systemd detected" \
         || err "systemd not found"
 
-    echo
-    ok "Environment ready"
+    ok "environment ready"
 }
 
 # ==================================================
 # add instance
 # ==================================================
 cmd_add() {
+    require_root
     INSTANCE="$1"
     validate_name "$INSTANCE"
 
     NEW_ETC="$(config_dir "$INSTANCE")"
-    SERVICE="$(service_name "$INSTANCE")"
-    SERVICE_FILE="${SYSTEMD_DIR}/${SERVICE}"
+    SERVICE_FILE="${SYSTEMD_DIR}/$(service_name "$INSTANCE")"
 
-    [ -d "$BASE_ETC" ] || err "base config not found: $BASE_ETC"
-    [ -x "$BASE_BIN" ] || err "ppnode binary not found"
+    [ -d "$BASE_ETC" ] || err "base config not found"
     [ ! -d "$NEW_ETC" ] || err "instance already exists"
     [ ! -f "$SERVICE_FILE" ] || err "service already exists"
 
@@ -179,6 +158,7 @@ EOF
 # remove instance
 # ==================================================
 cmd_remove() {
+    require_root
     INSTANCE="$1"
     validate_name "$INSTANCE"
 
@@ -199,25 +179,29 @@ cmd_remove() {
 }
 
 # ==================================================
-# list instances
+# list instances (only our services)
 # ==================================================
 cmd_list() {
     printf "${BOLD}%-20s %-10s${RESET}\n" "INSTANCE" "STATUS"
     printf "%-20s %-10s\n" "--------" "------"
 
-    systemctl list-units --type=service --all | \
-    grep "${BASE_NAME}-" | awk '{print $1}' | while read -r svc; do
-        NAME="${svc#${BASE_NAME}-}"
-        NAME="${NAME%.service}"
-        STATE=$(systemctl is-active "$svc")
-        printf "%-20s %-10b\n" "$NAME" "$(status_color "$STATE")"
+    for svc in ${SYSTEMD_DIR}/${BASE_NAME}-*.service; do
+        [ -e "$svc" ] || continue
+
+        name=$(basename "$svc")
+        inst="${name#${BASE_NAME}-}"
+        inst="${inst%.service}"
+        state=$(systemctl is-active "$name" 2>/dev/null || echo unknown)
+
+        printf "%-20s %-10b\n" "$inst" "$(status_color "$state")"
     done
 }
 
 # ==================================================
-# control instance
+# control & status
 # ==================================================
 cmd_ctl() {
+    require_root
     ACTION="$1"
     INSTANCE="$2"
     validate_name "$INSTANCE"
@@ -225,6 +209,7 @@ cmd_ctl() {
 }
 
 cmd_status() {
+    require_root
     INSTANCE="$1"
     validate_name "$INSTANCE"
     systemctl status "$(service_name "$INSTANCE")"
@@ -234,6 +219,8 @@ cmd_status() {
 # manage UI
 # ==================================================
 cmd_manage() {
+    require_root
+
     while true; do
         clear
         echo -e "${BOLD}${BLUE}PPanel-node Manager${RESET}"
@@ -260,13 +247,11 @@ cmd_manage() {
             0) exit 0 ;;
             *) warn "invalid choice" ;;
         esac
+
         echo
         read -p "Press Enter to continue..."
     done
 }
-
-
-
 
 # ==================================================
 # main
