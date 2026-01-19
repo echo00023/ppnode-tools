@@ -245,12 +245,25 @@ cmd_manage() {
 }
 
 # ==================================================
-# self install
+# self install (curl | bash safe)
 # ==================================================
-if [ "$0" != "/usr/local/bin/ppnode" ]; then
-    install -m 755 "$0" /usr/local/bin/ppnode
-    ok "installed to /usr/local/bin/ppnode"
+SELF_PATH="/usr/local/bin/ppnode"
+
+if [ ! -x "$SELF_PATH" ]; then
+    echo "[*] Installing ppnode to $SELF_PATH"
+
+    if [ -n "$BASH_SOURCE" ] && [ -f "$BASH_SOURCE" ]; then
+        # normal execution (bash file.sh)
+        cp "$BASH_SOURCE" "$SELF_PATH"
+    else
+        # curl | bash
+        cat > "$SELF_PATH"
+    fi
+
+    chmod +x "$SELF_PATH"
+    ok "ppnode installed to $SELF_PATH"
 fi
+
 
 # ==================================================
 # main
