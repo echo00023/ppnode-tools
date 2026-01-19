@@ -52,6 +52,23 @@ status_color() {
         *)        echo "$1" ;;
     esac
 }
+# ==================================================
+# self install (ABSOLUTELY curl | bash SAFE)
+# ==================================================
+SELF_BIN="/usr/local/bin/ppnode"
+
+if [ ! -x "$SELF_BIN" ]; then
+    echo "[*] Installing ppnode to $SELF_BIN"
+    mkdir -p /usr/local/bin
+
+    # stdin -> file (curl | bash safe)
+    cat > "$SELF_BIN"
+
+    chmod +x "$SELF_BIN"
+    echo "[OK] ppnode installed"
+    echo "You can now run: ppnode"
+    exit 0
+fi
 
 # ==================================================
 # install (official)
@@ -244,25 +261,7 @@ cmd_manage() {
     done
 }
 
-# ==================================================
-# self install (curl | bash safe)
-# ==================================================
-SELF_PATH="/usr/local/bin/ppnode"
 
-if [ ! -x "$SELF_PATH" ]; then
-    echo "[*] Installing ppnode to $SELF_PATH"
-
-    if [ -n "$BASH_SOURCE" ] && [ -f "$BASH_SOURCE" ]; then
-        # normal execution (bash file.sh)
-        cp "$BASH_SOURCE" "$SELF_PATH"
-    else
-        # curl | bash
-        cat > "$SELF_PATH"
-    fi
-
-    chmod +x "$SELF_PATH"
-    ok "ppnode installed to $SELF_PATH"
-fi
 
 
 # ==================================================
