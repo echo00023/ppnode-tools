@@ -130,42 +130,41 @@ cmd_add() {
     [ ! -f "$SERVICE_FILE" ] || err "service already exists"
 
     cp -a "$BASE_ETC" "$NEW_ETC"
-    CONFIG_FILE="${NEW_ETC}/config.json"
-    BASE_CONFIG="${BASE_ETC}/config.json"
+    CONFIG_FILE="${NEW_ETC}/config.yml"
+    BASE_CONFIG="${BASE_ETC}/config.yml"
     
     echo
-    read -p "Use same panel (api-host & secret-key) as main instance? [Y/n]: " SAME
+    echo "Main config file: $BASE_CONFIG"
+    
+    read -p "Reuse main panel configuration? [Y/n]: " SAME
     SAME=${SAME:-Y}
     
     if [[ "$SAME" =~ ^[Yy]$ ]]; then
-        # 从主配置读取
-        API_HOST=$(grep -oP '"api-host"\s*:\s*"\K[^"]+' "$BASE_CONFIG")
-        SECRET_KEY=$(grep -oP '"secret-key"\s*:\s*"\K[^"]+' "$BASE_CONFIG")
+        echo
+        echo "Please confirm main panel information:"
     
-        [ -n "$API_HOST" ]   || err "failed to read api-host from base config"
-        [ -n "$SECRET_KEY" ] || err "failed to read secret-key from base config"
-    
-        read -p "Server ID: " SERVER_ID
-        [ -n "$SERVER_ID" ] || err "server-id cannot be empty"
-    else
         read -p "API Host: " API_HOST
-        read -p "Server ID: " SERVER_ID
         read -p "Secret Key: " SECRET_KEY
-    
-        [ -n "$API_HOST" ]   || err "api-host cannot be empty"
-        [ -n "$SERVER_ID" ]  || err "server-id cannot be empty"
-        [ -n "$SECRET_KEY" ] || err "secret-key cannot be empty"
+        read -p "Server ID: " SERVER_ID
+    else
+        echo
+        read -p "API Host: " API_HOST
+        read -p "Secret Key: " SECRET_KEY
+        read -p "Server ID: " SERVER_ID
     fi
     
-    # 写入新 config.json（简单、可靠的方式）
+    [ -n "$API_HOST" ]   || err "api-host cannot be empty"
+    [ -n "$SECRET_KEY" ] || err "secret-key cannot be empty"
+    [ -n "$SERVER_ID" ]  || err "server-id cannot be empty"
+    
+    # 写入 config.yml（最安全方式：整文件替换关键字段）
     sed -i \
-        -e "s#\"api-host\"[[:space:]]*:[[:space:]]*\"[^\"]*\"#\"api-host\": \"${API_HOST}\"#" \
-        -e "s#\"server-id\"[[:space:]]*:[[:space:]]*[0-9]*#\"server-id\": ${SERVER_ID}#" \
-        -e "s#\"secret-key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"#\"secret-key\": \"${SECRET_KEY}\"#" \
+        -e "s#^api-host:.*#api-host: ${API_HOST}#" \
+        -e "s#^secret-key:.*#secret-key: ${SECRET_KEY}#" \
+        -e "s#^server-id:.*#server-id: ${SERVER_ID}#" \
         "$CONFIG_FILE"
     
-    ok "panel configuration updated"
-
+    ok "panel configuration updated in config.yml"
 
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
