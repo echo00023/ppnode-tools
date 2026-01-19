@@ -98,20 +98,24 @@ cmd_install() {
     [ -n "$SERVER_ID" ]  || err "--server-id is required"
     [ -n "$SECRET_KEY" ] || err "--secret-key is required"
 
-    TMP=$(mktemp)
+    TMP_DIR=$(mktemp -d)
+    INSTALL_SH="$TMP_DIR/install.sh"
+
     ok "downloading official install script"
-    wget -qO "$TMP" "$OFFICIAL_INSTALL_URL"
+    wget -qO "$INSTALL_SH" "$OFFICIAL_INSTALL_URL"
+    chmod +x "$INSTALL_SH"
 
     ok "running official installer"
-    bash "$TMP" \
+    "$INSTALL_SH" \
         --api-host "$API_HOST" \
         --server-id "$SERVER_ID" \
         --secret-key "$SECRET_KEY"
 
-    rm -f "$TMP"
+    rm -rf "$TMP_DIR"
 
     ok "ppnode installed successfully"
 }
+
 
 # ==================================================
 # init (environment check)
