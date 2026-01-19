@@ -57,27 +57,54 @@ cmd_add() {
     [ -d "$BASE_ETC" ] || err "base config dir not found: $BASE_ETC"
     [ ! -d "$NEW_ETC" ] || err "instance already exists"
 
+    BASE_CONFIG="${BASE_ETC}/config.yml"
+    [ -f "$BASE_CONFIG" ] || err "base config.yml not found"
+
     echo
     echo -e "${BOLD}Adding instance:${RESET} $INSTANCE"
 
+    # 1. copy base config
     cp -a "$BASE_ETC" "$NEW_ETC"
 
     CONFIG_FILE="${NEW_ETC}/config.yml"
-    [ -f "$CONFIG_FILE" ] || err "config.yml not found"
+    [ -f "$CONFIG_FILE" ] || err "config.yml not found in new instance"
+
+    # 2. read base ApiHost / SecretKey (SAFE read)
+    BASE_API_HOST=$(grep -E "^[[:space:]]*ApiHost:" "$BASE_CONFIG" | sed 's/.*ApiHost:[[:space:]]*//')
+    BASE_SECRET_KEY=$(grep -E "^[[:space:]]*SecretKey:" "$BASE_CONFIG" | sed 's/.*SecretKey:[[:space:]]*//')
+
+    [ -n "$BASE_API_HOST" ] || err "failed to read ApiHost from base config"
+    [ -n "$BASE_SECRET_KEY" ] || err "failed to read SecretKey from base config"
 
     echo
-    read -p "API Host: " API_HOST
-    read -p "Server ID: " SERVER_ID
-    read -p "Secret Key: " SECRET_KEY
+    echo "Base panel configuration detected:"
+    echo "  ApiHost    : $BASE_API_HOST"
+    echo "  SecretKey : ********"
+    echo
+
+    read -p "Use same panel (ApiHost & SecretKey)? [Y/n]: " SAME
+    SAME=${SAME:-Y}
+
+    if [[ "$SAME" =~ ^[Yy]$ ]]; then
+        API_HOST="$BASE_API_HOST"
+        SECRET_KEY="$BASE_SECRET_KEY"
+        read -p "Server ID: " SERVER_ID
+    else
+        read -p "API Host: " API_HOST
+        read -p "Server ID: " SERVER_ID
+        read -p "Secret Key: " SECRET_KEY
+    fi
 
     [ -n "$API_HOST" ]   || err "ApiHost cannot be empty"
     [ -n "$SERVER_ID" ]  || err "ServerID cannot be empty"
     [ -n "$SECRET_KEY" ] || err "SecretKey cannot be empty"
 
+    # 3. escape values for sed
     API_HOST_ESC=$(escape_sed "$API_HOST")
     SERVER_ID_ESC=$(escape_sed "$SERVER_ID")
     SECRET_KEY_ESC=$(escape_sed "$SECRET_KEY")
 
+    # 4. update YAML (safe for indentation & special chars)
     sed -i -E \
       -e "s|^([[:space:]]*ApiHost:).*|\1 ${API_HOST_ESC}|" \
       -e "s|^([[:space:]]*ServerID:).*|\1 ${SERVER_ID_ESC}|" \
@@ -86,6 +113,7 @@ cmd_add() {
 
     ok "config.yml updated (ApiHost / ServerID / SecretKey)"
 
+    # 5. create systemd service
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=PPanel-node ${INSTANCE}
@@ -107,6 +135,7 @@ EOF
     systemctl daemon-reload
     ok "instance '${INSTANCE}' created"
 }
+
 
 # ==================================================
 # list instances (ONLY ours)
