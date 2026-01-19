@@ -130,6 +130,42 @@ cmd_add() {
     [ ! -f "$SERVICE_FILE" ] || err "service already exists"
 
     cp -a "$BASE_ETC" "$NEW_ETC"
+    CONFIG_FILE="${NEW_ETC}/config.json"
+    BASE_CONFIG="${BASE_ETC}/config.json"
+    
+    echo
+    read -p "Use same panel (api-host & secret-key) as main instance? [Y/n]: " SAME
+    SAME=${SAME:-Y}
+    
+    if [[ "$SAME" =~ ^[Yy]$ ]]; then
+        # 从主配置读取
+        API_HOST=$(grep -oP '"api-host"\s*:\s*"\K[^"]+' "$BASE_CONFIG")
+        SECRET_KEY=$(grep -oP '"secret-key"\s*:\s*"\K[^"]+' "$BASE_CONFIG")
+    
+        [ -n "$API_HOST" ]   || err "failed to read api-host from base config"
+        [ -n "$SECRET_KEY" ] || err "failed to read secret-key from base config"
+    
+        read -p "Server ID: " SERVER_ID
+        [ -n "$SERVER_ID" ] || err "server-id cannot be empty"
+    else
+        read -p "API Host: " API_HOST
+        read -p "Server ID: " SERVER_ID
+        read -p "Secret Key: " SECRET_KEY
+    
+        [ -n "$API_HOST" ]   || err "api-host cannot be empty"
+        [ -n "$SERVER_ID" ]  || err "server-id cannot be empty"
+        [ -n "$SECRET_KEY" ] || err "secret-key cannot be empty"
+    fi
+    
+    # 写入新 config.json（简单、可靠的方式）
+    sed -i \
+        -e "s#\"api-host\"[[:space:]]*:[[:space:]]*\"[^\"]*\"#\"api-host\": \"${API_HOST}\"#" \
+        -e "s#\"server-id\"[[:space:]]*:[[:space:]]*[0-9]*#\"server-id\": ${SERVER_ID}#" \
+        -e "s#\"secret-key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"#\"secret-key\": \"${SECRET_KEY}\"#" \
+        "$CONFIG_FILE"
+    
+    ok "panel configuration updated"
+
 
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
